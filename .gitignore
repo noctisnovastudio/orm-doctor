@@ -1,0 +1,6 @@
+node_modules/
+.orm-doctor-report.json
+*.log
+.DS_Store
+__fixtures__/
+_smoke/

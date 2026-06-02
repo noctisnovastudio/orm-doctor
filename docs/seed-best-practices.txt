@@ -1,0 +1,423 @@
+================================================================================
+  PRISMA SEED FILES — BEST PRACTICES & CANONICAL FIX GUIDE
+  NoctisNova Engineering Docs  |  noctisnova.com
+================================================================================
+
+WHAT IS A SEED FILE?
+─────────────────────
+A seed file populates your database with initial or test data — user accounts,
+product catalogues, feature flags, demo content. In Prisma, the seed script is
+defined in package.json and run with `npx prisma db seed`.
+
+Seed files look harmless but contain some of the most common patterns that
+break CI pipelines, corrupt data across environments, and cause hours of
+debugging. This guide covers every mistake orm-doctor detects and how to fix it.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THE CANONICAL PRISMA SEED TEMPLATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Copy this template and adapt it. It handles every best practice covered below.
+
+  // prisma/seed.ts
+  import { PrismaClient } from '@prisma/client';
+
+  const prisma = new PrismaClient();
+
+  async function main() {
+    // ── Step 1: Clear existing data (child tables first) ──────────────────
+    await prisma.comment.deleteMany({});
+    await prisma.post.deleteMany({});
+    await prisma.user.deleteMany({});
+
+    // ── Step 2: Seed in dependency order (parents first) ──────────────────
+    const alice = await prisma.user.create({
+      data: {
+        // No hardcoded id — Prisma generates it
+        email: 'alice@example.com',
+        name: 'Alice',
+      },
+    });
+
+    const bob = await prisma.user.create({
+      data: {
+        email: 'bob@example.com',
+        name: 'Bob',
+      },
+    });
+
+    // ── Step 3: Use createMany for bulk data ───────────────────────────────
+    await prisma.post.createMany({
+      data: [
+        { title: 'Hello World', authorId: alice.id },
+        { title: 'Second Post', authorId: alice.id },
+        { title: 'Bob Post',    authorId: bob.id },
+      ],
+      skipDuplicates: true,
+    });
+
+    console.log('Seed complete.');
+  }
+
+  // ── Step 4: Always disconnect in finally ──────────────────────────────────
+  main()
+    .then(async () => {
+      await prisma.$disconnect();
+    })
+    .catch(async (e) => {
+      console.error(e);
+      await prisma.$disconnect();
+      process.exit(1);
+    });
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ISSUE 1 — HARDCODED IDs IN SEED DATA  (orm-doctor rule: seed-hardcoded-id)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT IT IS:
+Assigning a literal UUID, CUID, or numeric string to the `id` field of a
+Prisma create call.
+
+  // BAD — hardcoded ID
+  await prisma.user.create({
+    data: {
+      id: 'clxxxxxxxxxxxxxxxxxxxxxx',
+      email: 'alice@example.com',
+    },
+  });
+
+WHY IT IS A PROBLEM:
+  1. Re-seed conflict — Run the seed twice without clearing first. The second
+     run throws: "Unique constraint failed on the fields: (`id`)". The ID
+     already exists and Prisma refuses to insert a duplicate.
+
+  2. Environment conflict — Copy the seed to a new environment where different
+     records may already hold that ID. Silent data corruption or constraint
+     errors, depending on your schema.
+
+  3. Brittle relations — If another seed file also hardcodes a related ID,
+     any change to one breaks the other. You end up maintaining a web of magic
+     string IDs across files.
+
+THE FIX:
+Never specify `id` in seed creates. Let Prisma generate it from your schema's
+`@default(cuid())` or `@default(uuid())`. Capture the returned object if you
+need the ID for a relation.
+
+  // GOOD — let Prisma generate the ID
+  const alice = await prisma.user.create({
+    data: {
+      email: 'alice@example.com',
+      name: 'Alice',
+    },
+  });
+
+  // Reference the generated ID for child records
+  await prisma.post.create({
+    data: {
+      title: 'First Post',
+      authorId: alice.id,   // ← use the returned ID, not a hardcoded string
+    },
+  });
+
+EXCEPTION — WHEN HARDCODED IDs ARE ACCEPTABLE:
+  - Feature flags or config records where the ID is a well-known slug (not UUID)
+    and is explicitly referenced by application code (e.g. `id: 'free-plan'`).
+  - In these cases, use `upsert` instead of `create` to handle both first-run
+    and re-seed safely.
+
+  await prisma.plan.upsert({
+    where: { id: 'free-plan' },
+    update: {},
+    create: { id: 'free-plan', name: 'Free', price: 0 },
+  });
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ISSUE 2 — MISSING CLEAR BEFORE CREATE  (orm-doctor rule: seed-no-truncate)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT IT IS:
+A seed file that calls `create()` or `createMany()` without first deleting or
+truncating existing records.
+
+  // BAD — no clear before create
+  async function main() {
+    await prisma.user.create({ data: { email: 'alice@example.com' } });
+    await prisma.user.create({ data: { email: 'bob@example.com' } });
+  }
+
+WHY IT IS A PROBLEM:
+  - First run: works perfectly.
+  - Second run in CI: throws "Unique constraint failed on the fields: (`email`)"
+    because alice and bob already exist.
+  - Result: the entire CI pipeline fails, often with a cryptic error that looks
+    like a schema problem rather than a seed problem.
+
+THE FIX:
+Add `deleteMany` at the top of your seed in reverse dependency order
+(children before parents — otherwise FK constraints prevent deletion).
+
+  async function main() {
+    // Clear in child-first order to respect FK constraints
+    await prisma.comment.deleteMany({});
+    await prisma.post.deleteMany({});
+    await prisma.user.deleteMany({});
+
+    // Now create safely
+    await prisma.user.create({ data: { email: 'alice@example.com' } });
+  }
+
+ALTERNATIVE — USE upsert FOR EVERY RECORD:
+If you need to preserve existing data and only add missing records, use
+`upsert` with a unique identifier as the where clause.
+
+  await prisma.user.upsert({
+    where:  { email: 'alice@example.com' },
+    update: { name: 'Alice' },   // update fields if exists
+    create: { email: 'alice@example.com', name: 'Alice' },
+  });
+
+This is safe to run any number of times but is slower than deleteMany + create
+because it issues a SELECT before each INSERT.
+
+DEPENDENCY ORDER FOR deleteMany:
+Always delete in the order that satisfies foreign key constraints:
+
+  Given: Comment → Post → User
+  Delete order: Comment first, then Post, then User.
+  Create order:  User first, then Post, then Comment.
+
+  Violating this order throws: "Foreign key constraint failed on the field: ..."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ISSUE 3 — MISSING prisma.$disconnect()  (orm-doctor rule: seed-no-disconnect)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT IT IS:
+A seed file that performs database operations but never closes the connection
+pool by calling `prisma.$disconnect()`.
+
+  // BAD — no disconnect
+  async function main() {
+    await prisma.user.create({ data: { email: 'alice@example.com' } });
+    console.log('Done!');
+  }
+  main();
+
+WHY IT IS A PROBLEM:
+Prisma's connection pool keeps the Node.js event loop alive. Without explicitly
+disconnecting, the process waits for the pool idle timeout before exiting.
+In a local terminal you see a hanging process. In CI the job appears to
+complete (logs show "Done!") but the process never exits — eventually the CI
+runner kills it after a timeout and marks the job as failed.
+
+  Symptom: Seed runs successfully in logs but CI job fails after 60–120 seconds
+  with "Job was canceled" or "Timeout exceeded".
+
+THE FIX — CANONICAL PRISMA PATTERN:
+Prisma's official pattern uses `.then().catch()` chaining to guarantee
+disconnect in both success and failure cases.
+
+  main()
+    .then(async () => {
+      await prisma.$disconnect();
+    })
+    .catch(async (e) => {
+      console.error(e);
+      await prisma.$disconnect();
+      process.exit(1);
+    });
+
+ALTERNATIVE — try/finally:
+
+  async function main() {
+    try {
+      await prisma.user.create({ data: { email: 'alice@example.com' } });
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+
+  main().catch((e) => { console.error(e); process.exit(1); });
+
+Both patterns are correct. The `.then().catch()` pattern is what Prisma's own
+documentation and `prisma init` scaffold generate — prefer it for consistency.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ISSUE 4 — LARGE BATCH VIA INDIVIDUAL create() CALLS (orm-doctor: seed-large-batch)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT IT IS:
+A seed file that inserts many records using individual `create()` calls in a
+loop, rather than `createMany()`.
+
+  // BAD — 200 round-trips to the database
+  for (const product of products) {
+    await prisma.product.create({ data: product });
+  }
+
+  // ALSO BAD — Promise.all is faster but still N queries
+  await Promise.all(products.map((p) => prisma.product.create({ data: p })));
+
+WHY IT IS A PROBLEM:
+Each `create()` call is a separate SQL INSERT and a separate round-trip to the
+database. With 50+ records:
+  - Local dev: 2–5 seconds of unnecessary wait on every `prisma db seed`
+  - CI: often 20–60 seconds, regularly exceeding the 30-second default timeout
+  - Saturates the connection pool if run in parallel
+
+THE FIX — USE createMany():
+`createMany()` sends all records in a single SQL INSERT statement.
+
+  // GOOD — 1 query, any number of records
+  await prisma.product.createMany({
+    data: products,         // array of objects
+    skipDuplicates: true,   // safe for idempotent seeds
+  });
+
+Performance difference on 200 records:
+  create() in loop:    ~4,000ms  (200 × ~20ms per query)
+  createMany():        ~15ms     (1 query)
+
+LIMITATIONS OF createMany():
+  1. Does not return the created records (no IDs back).
+     Workaround: findMany() after createMany() to get the IDs.
+
+  2. Does not support nested creates (no include-style nested data).
+     Workaround: Create parent records with createMany(), then create
+     child records in a second createMany() using parent IDs.
+
+  3. SQLite does not support skipDuplicates — remove it if using SQLite.
+
+CHUNKED BATCHING FOR VERY LARGE DATASETS:
+For 10,000+ records, split into chunks to avoid hitting database
+max_allowed_packet or parameter limits:
+
+  const CHUNK_SIZE = 500;
+
+  async function batchCreate<T>(data: T[], model: any) {
+    for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+      await model.createMany({
+        data: data.slice(i, i + CHUNK_SIZE),
+        skipDuplicates: true,
+      });
+    }
+  }
+
+  await batchCreate(products, prisma.product);
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADVANCED — ENVIRONMENT-SPECIFIC SEEDING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Different environments need different data. Never use a single monolithic seed
+for all environments. Use NODE_ENV to branch:
+
+  async function main() {
+    // Always run — base data every environment needs
+    await seedPlans();
+    await seedFeatureFlags();
+
+    if (process.env.NODE_ENV !== 'production') {
+      // Dev and staging only — demo users and test content
+      await seedDemoUsers();
+      await seedSampleContent();
+    }
+  }
+
+For staging environments that need a realistic data volume without actual
+user PII, use a data generation library:
+
+  import { faker } from '@faker-js/faker';
+
+  const users = Array.from({ length: 1000 }, () => ({
+    email: faker.internet.email(),
+    name:  faker.person.fullName(),
+  }));
+
+  await prisma.user.createMany({ data: users, skipDuplicates: true });
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADVANCED — WRAPPING SEED IN A TRANSACTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If your seed partially fails halfway through, you can end up with half-seeded
+data that is difficult to clean up. Wrapping the whole seed in a transaction
+guarantees all-or-nothing:
+
+  async function main() {
+    await prisma.$transaction(async (tx) => {
+      await tx.comment.deleteMany({});
+      await tx.post.deleteMany({});
+      await tx.user.deleteMany({});
+
+      const alice = await tx.user.create({ data: { email: 'alice@example.com' } });
+      await tx.post.createMany({
+        data: [{ title: 'Post 1', authorId: alice.id }],
+      });
+    });
+  }
+
+CAVEATS:
+  - Transactions hold locks. Very large seeds inside a transaction can cause
+    lock contention on busy databases.
+  - The transaction must complete within the $transaction timeout (default 5s).
+    Set a custom timeout for large seeds:
+
+    await prisma.$transaction(async (tx) => { ... }, {
+      maxWait: 10000,
+      timeout: 60000,  // 60 seconds for large seed
+    });
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SEED FILE CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before committing a seed file, verify:
+
+  [ ] No hardcoded UUID/CUID/numeric literals in id fields
+      (use upsert with a meaningful slug if you need stable IDs)
+
+  [ ] deleteMany() or upsert() at the top — seed is safe to re-run
+
+  [ ] prisma.$disconnect() called in both success and error paths
+
+  [ ] Bulk inserts use createMany() not create() in a loop
+
+  [ ] Delete order respects FK constraints (children before parents)
+
+  [ ] Create order respects FK constraints (parents before children)
+
+  [ ] Environment-specific data is gated behind NODE_ENV checks
+
+  [ ] No process.env variables read without fallback values
+      (CI env may differ from local — always provide defaults)
+
+  [ ] Seed runs in under 10 seconds locally
+      (target: under 30 seconds in CI including connection overhead)
+
+  [ ] Tested by running `npx prisma db seed` twice in a row without error
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERIFICATION — CONFIRM YOUR SEED IS CORRECT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Re-run orm-doctor — all seed issues should be gone:
+     npx orm-doctor --no-ai
+
+  2. Run the seed twice in a row and verify it succeeds both times:
+     npx prisma db seed && npx prisma db seed
+
+  3. Verify the process exits cleanly (no hanging):
+     time npx prisma db seed
+     The command should return to the shell prompt immediately after "Done."
+
+  4. Check seed time is under 30 seconds:
+     time npx prisma db seed
+     If over 30 seconds, identify the slowest createMany calls with
+     console.time() / console.timeEnd() and batch them into fewer queries.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Built by NoctisNova  |  noctisnova.com  |  hello@noctisnova.com
+  Future-focused AI + engineering studio
+================================================================================

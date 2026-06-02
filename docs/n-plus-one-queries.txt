@@ -1,0 +1,410 @@
+================================================================================
+  N+1 QUERY PROBLEM — CANONICAL FIX GUIDE
+  NoctisNova Engineering Docs  |  noctisnova.com
+================================================================================
+
+WHAT IS THE N+1 PROBLEM?
+─────────────────────────
+The N+1 problem happens when your code makes one database query to fetch a list
+of N records, then makes N more individual queries — one per record — to fetch
+related data. Total queries: 1 + N.
+
+At 50 records that is 51 queries. At 1,000 records it is 1,001 queries. Under
+real traffic with concurrent users, this compounds rapidly and collapses your
+database connection pool, causing timeouts for every user simultaneously.
+
+This is the single most common and most damaging ORM mistake in production
+Node.js applications.
+
+REAL-WORLD SEVERITY
+────────────────────
+Low traffic (dev environment):   Invisible. Feels fast.
+Medium traffic (staging):         Occasionally slow. Easy to dismiss.
+High traffic (production):        Pages time out. DB CPU spikes to 100%.
+                                  Connection pool exhausted. Every user affected.
+
+A team at a SaaS company found their /api/dashboard endpoint making 1,848
+database queries per request (1 + 1,847 tenants). After the fix: 2 queries.
+Response time dropped from ~4 seconds to under 50ms.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW TO SPOT IT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Pattern 1 — Array method with await inside the callback:
+
+  // RED FLAG
+  const posts = await prisma.post.findMany();
+  const enriched = await Promise.all(
+    posts.map(async (post) => {
+      const author = await prisma.user.findUnique({ where: { id: post.authorId } });
+      return { ...post, author };
+    })
+  );
+
+  Promise.all makes this look concurrent but it is still N separate queries.
+  The fix is not parallelism — it is fewer round-trips.
+
+Pattern 2 — for...of loop with a database call:
+
+  // RED FLAG
+  for (const id of postIds) {
+    const comments = await prisma.comment.findMany({ where: { postId: id } });
+    results.push(comments);
+  }
+
+Pattern 3 — Standard for loop with a database call:
+
+  // RED FLAG
+  for (let i = 0; i < orders.length; i++) {
+    const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orders[i].id));
+  }
+
+Pattern 4 — Prisma fluent API (least obvious):
+
+  // RED FLAG — .posts() executes a new query each call
+  const users = await prisma.user.findMany();
+  for (const user of users) {
+    const posts = await prisma.user.findUnique({ where: { id: user.id } }).posts();
+  }
+
+Pattern 5 — GraphQL resolvers without DataLoader:
+
+  // RED FLAG — resolver fires per-record
+  const resolvers = {
+    Post: {
+      author: (post) => prisma.user.findUnique({ where: { id: post.authorId } }),
+    },
+  };
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIX 1 — PRISMA: EAGER LOADING WITH include (RECOMMENDED FIRST)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use include to fetch related records in the same query. Prisma issues 2 queries
+(one for parents, one batch for all children) regardless of how many records
+are returned. This is NOT N+1 — 2 queries is the correct, optimised result.
+
+  BEFORE (N+1 — 1 + N queries):
+  ─────────────────────────────
+  const posts = await prisma.post.findMany();
+  const enriched = await Promise.all(
+    posts.map(async (post) => {
+      const author = await prisma.user.findUnique({ where: { id: post.authorId } });
+      return { ...post, author };
+    })
+  );
+
+  AFTER (2 queries flat, any N):
+  ──────────────────────────────
+  const posts = await prisma.post.findMany({
+    include: {
+      author: true,
+    },
+  });
+
+For nested relations, keep including:
+
+  const posts = await prisma.post.findMany({
+    include: {
+      author: {
+        select: { id: true, name: true, email: true }, // only fields you need
+      },
+      comments: {
+        include: {
+          author: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 5, // always limit nested collections
+      },
+    },
+  });
+
+WHEN TO USE: Any time you need related data for a list of records and the
+relation is defined in your Prisma schema. This is the simplest and most
+readable fix in the vast majority of cases.
+
+GOTCHA: include fetches all fields on the related model. On wide tables
+(50+ columns) or relations that return many records, always use select inside
+include to limit data transfer. An unconstrained include can be slower than
+the N+1 it replaces if you are pulling megabytes of data per row.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIX 2 — PRISMA: select WITH NESTED RELATIONS (MOST EFFICIENT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use select at the top level instead of include when you want to control
+exactly which fields come back on both the parent and child. This minimises
+bandwidth and memory usage.
+
+  const posts = await prisma.post.findMany({
+    select: {
+      id: true,
+      title: true,
+      publishedAt: true,
+      author: {
+        select: {
+          id: true,
+          name: true,
+          avatarUrl: true,
+        },
+      },
+    },
+  });
+
+WHEN TO USE: When you know exactly which fields you need. Especially important
+in API responses that are serialised to JSON — never over-fetch.
+
+RULE: Never use include without also specifying select on the nested relation
+on production code paths that handle large result sets.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIX 3 — PRISMA: BATCH WITH findMany + in FILTER (MANUAL BATCHING)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When a relation is not modelled in Prisma schema (e.g. fetching from a service
+or external API), or when you need aggregates per ID, collect all IDs first,
+fetch in one query, then build a Map for O(1) lookups.
+
+  BEFORE (N+1):
+  const posts = await prisma.post.findMany({ where: { published: true } });
+  for (const post of posts) {
+    const count = await prisma.comment.count({ where: { postId: post.id } });
+    post.commentCount = count;
+  }
+
+  AFTER (2 queries flat):
+  const posts = await prisma.post.findMany({ where: { published: true } });
+
+  const postIds = posts.map((p) => p.id);
+
+  const commentCounts = await prisma.comment.groupBy({
+    by: ['postId'],
+    where: { postId: { in: postIds } },
+    _count: { _all: true },
+  });
+
+  // O(1) Map lookup — never do find() inside a loop
+  const countMap = new Map(commentCounts.map((c) => [c.postId, c._count._all]));
+
+  const enriched = posts.map((post) => ({
+    ...post,
+    commentCount: countMap.get(post.id) ?? 0,
+  }));
+
+WHEN TO USE: Aggregates (counts, sums), data that comes from a second model
+not related via schema, or situations where include would pull too much data.
+
+KEY RULE: Always build a Map from the batch result and use map.get(id) in
+your loop. NEVER use array.find() inside a loop — that is O(N²).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIX 4 — PRISMA + GRAPHQL: DATALOADER PATTERN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In GraphQL field resolvers, each resolver runs independently per record. Without
+DataLoader, fetching the author for a list of 10 posts fires 10 separate queries.
+DataLoader batches all load() calls that happen in the same event loop tick into
+a single query.
+
+  // lib/loaders.ts
+  import DataLoader from 'dataloader';
+  import { prisma } from './prisma';
+
+  export function createLoaders() {
+    return {
+      user: new DataLoader<string, User | null>(
+        async (ids) => {
+          const users = await prisma.user.findMany({
+            where: { id: { in: [...ids] } },
+            select: { id: true, name: true, email: true, avatarUrl: true },
+          });
+          // CRITICAL: returned array MUST be same length and order as input ids
+          const map = new Map(users.map((u) => [u.id, u]));
+          return ids.map((id) => map.get(id) ?? null);
+        },
+        { cache: true } // deduplicates within a single request
+      ),
+
+      post: new DataLoader<string, Post | null>(async (ids) => {
+        const posts = await prisma.post.findMany({
+          where: { id: { in: [...ids] } },
+        });
+        const map = new Map(posts.map((p) => [p.id, p]));
+        return ids.map((id) => map.get(id) ?? null);
+      }),
+    };
+  }
+
+  // Attach loaders to GraphQL context (one instance per request, not singleton)
+  // server.ts
+  const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+    context: ({ req }) => ({
+      loaders: createLoaders(), // NEW instance per request — prevents data leakage
+    }),
+  });
+
+  // resolver.ts — now N posts = 1 batch query, not N queries
+  const resolvers = {
+    Post: {
+      author: (post, _, context) => context.loaders.user.load(post.authorId),
+    },
+  };
+
+CRITICAL RULES FOR DATALOADER:
+  1. ALWAYS create a new DataLoader instance per request. A singleton DataLoader
+     will cache results across requests and leak data between users.
+  2. The batch function MUST return an array of the SAME LENGTH and in the SAME
+     ORDER as the input ids array. If a record is not found, return null at
+     that position. Failing this causes silent data corruption.
+  3. Use cache: true (default) for within-request deduplication — the same ID
+     loaded twice in one request only triggers one database lookup.
+  4. Use loader.prime(id, value) to pre-populate the cache when you already
+     have the data, avoiding redundant lookups.
+
+WHEN TO USE: GraphQL resolvers, REST endpoints where the same entity is
+resolved multiple times in a single request lifecycle.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIX 5 — DRIZZLE ORM: RELATIONAL QUERY API (with)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Drizzle's RQBv2 relational query API eliminates N+1 with a with() clause that
+generates an optimised query — no N+1, no over-fetching.
+
+  BEFORE (N+1 in Drizzle):
+  const users = await db.select().from(usersTable);
+  const withPosts = await Promise.all(
+    users.map(async (user) => ({
+      ...user,
+      posts: await db.select().from(postsTable).where(eq(postsTable.userId, user.id)),
+    }))
+  );
+
+  AFTER — Drizzle relational API (1 optimised query):
+  const users = await db.query.users.findMany({
+    with: {
+      posts: {
+        columns: { id: true, title: true, publishedAt: true },
+        limit: 10,
+        orderBy: (posts, { desc }) => [desc(posts.createdAt)],
+      },
+    },
+  });
+
+For more complex cases — JOIN with filtering across both tables:
+
+  const result = await db
+    .select({
+      userId:    users.id,
+      userName:  users.name,
+      postId:    posts.id,
+      postTitle: posts.title,
+    })
+    .from(users)
+    .leftJoin(posts, eq(users.id, posts.userId))
+    .where(eq(users.active, true));
+
+  // Group in application code
+  const grouped = result.reduce((acc, row) => {
+    if (!acc[row.userId]) acc[row.userId] = { id: row.userId, name: row.userName, posts: [] };
+    if (row.postId) acc[row.userId].posts.push({ id: row.postId, title: row.postTitle });
+    return acc;
+  }, {});
+
+DRIZZLE-SPECIFIC NOTES:
+  - Drizzle is ~4× faster than Prisma under load (9.4k vs 2.3k RPS on same hw)
+    and ~80× smaller bundle size — critical for edge/serverless deployments
+  - Use db.$with() for CTEs (Common Table Expressions) to handle complex
+    multi-step queries in a single round-trip
+  - Use db.batch([...]) on SQLite/D1 to send multiple queries in one HTTP call
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DETECTING N+1 IN PRODUCTION (BEFORE orm-doctor CATCHES IT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Enable Prisma query logging to see query counts in real time:
+
+  // prisma.ts
+  export const prisma = new PrismaClient({
+    log: [
+      { level: 'query', emit: 'event' },
+      { level: 'warn',  emit: 'stdout' },
+    ],
+  });
+
+  let queryCount = 0;
+  prisma.$on('query', () => { queryCount++; });
+
+  // In dev: log queryCount per request to see N+1 happening live
+
+For Drizzle, use the logger option:
+
+  const db = drizzle(client, {
+    logger: {
+      logQuery: (query, params) => console.log('QUERY:', query),
+    },
+  });
+
+For production monitoring:
+  - Set up Prisma Pulse or OpenTelemetry tracing to track queries per request
+  - Any endpoint averaging > 5 queries per request for a CRUD operation is suspect
+  - Use pg_stat_statements to see total query counts by fingerprint
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FALSE POSITIVE CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+orm-doctor flags loops containing database calls. Before fixing, verify:
+
+  [ ] Is the array always length 1? (e.g. iterating over a single result)
+      If yes: refactor to not use an array, not worth batching.
+
+  [ ] Is this in a test file? orm-doctor filters these — but confirm.
+
+  [ ] Is the loop over an external API list, not a DB result?
+      The inner DB call may already be a lookup, not the outer list.
+
+  [ ] Does the loop have early-return / break logic that prevents full iteration?
+      Batching still preferred but document the reason.
+
+  [ ] Is the total list size bounded and tiny (< 5 always)?
+      Low impact — fix anyway for correctness, note it in review.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUICK DECISION TREE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Is the related model in your Prisma schema?
+  ├── YES → Use include / select (Fix 1 or 2)
+  └── NO  →
+      Is this GraphQL?
+      ├── YES → Use DataLoader (Fix 4)
+      └── NO  → Use findMany + in + Map (Fix 3)
+
+  Using Drizzle?
+  ├── Relation defined in schema → Use with() (Fix 5)
+  └── Not in schema → Use inArray() + reduce to group
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERIFICATION — HOW TO CONFIRM THE FIX WORKED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Re-run orm-doctor: the N+1 issue should disappear from the report.
+     npx orm-doctor --no-ai
+
+  2. Check query logs: the endpoint should now show 1–3 queries regardless
+     of how many records are in the result set.
+
+  3. Load test: use k6 or autocannon to send 50 concurrent requests and
+     confirm DB CPU stays flat as concurrency increases.
+
+  4. Use EXPLAIN ANALYZE on the query Prisma generates (enable logging,
+     copy the SQL, paste into psql) to confirm it is not doing seq scans.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Built by NoctisNova  |  noctisnova.com  |  hello@noctisnova.com
+  Future-focused AI + engineering studio
+================================================================================

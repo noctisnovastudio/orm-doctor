@@ -1,0 +1,52 @@
+{
+  "name": "orm-doctor",
+  "version": "1.0.0",
+  "description": "Static analysis CLI for detecting ORM/database bottlenecks in TypeScript and Prisma/Drizzle codebases.",
+  "type": "module",
+  "bin": {
+    "orm-doctor": "./index.js"
+  },
+  "main": "./index.js",
+  "files": [
+    "index.js",
+    "src/"
+  ],
+  "scripts": {
+    "start": "node index.js",
+    "lint": "node --check index.js src/scanner.js src/ui.js"
+  },
+  "keywords": [
+    "orm",
+    "prisma",
+    "drizzle",
+    "static-analysis",
+    "ast",
+    "performance",
+    "n+1",
+    "database",
+    "cli",
+    "typescript"
+  ],
+  "author": "NoctisNova <hello@noctisnova.com> (https://noctisnova.com)",
+  "homepage": "https://noctisnova.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NoctisNovaStudio/orm-doctor"
+  },
+  "bugs": {
+    "url": "https://github.com/NoctisNovaStudio/orm-doctor/issues",
+    "email": "hello@noctisnova.com"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@clack/prompts": "^0.9.1",
+    "@mrleebo/prisma-ast": "^0.12.0",
+    "boxen": "^8.0.1",
+    "chalk": "^5.4.1",
+    "clipboardy": "^4.0.0",
+    "ts-morph": "^24.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

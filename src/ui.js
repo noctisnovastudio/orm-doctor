@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ui.js
  * Terminal UI components for orm-doctor.
  * Produces a react-doctor-style numbered issue list with severity badges,
@@ -55,7 +55,7 @@ const RULE_META = {
       "`$queryRawUnsafe(`SELECT * FROM users WHERE email = '${email}'`)` lets an attacker pass " +
       "`' OR '1'='1` and dump your whole users table. This is the #1 most-exploited web vulnerability.",
     severity: "critical",
-    docs: "https://noctisnova.com/docs/orm/raw-query-safety",
+    docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
   },
 
   "mass-mutation": {
@@ -71,7 +71,7 @@ const RULE_META = {
       "`prisma.user.deleteMany()` with no where deletes every user in the database. There's no undo. " +
       "This has ended companies — a missing where on a delete is a data-loss incident waiting to happen.",
     severity: "critical",
-    docs: "https://noctisnova.com/docs/orm/mass-mutations",
+    docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
   },
 
   "missing-pagination": {
@@ -87,7 +87,7 @@ const RULE_META = {
       "A dashboard that does `findMany()` on an `events` table is instant at launch and times out (or OOMs " +
       "the server) a year later when that table has 5 million rows. Pagination would have kept it at 20ms.",
     severity: "warning",
-    docs: "https://noctisnova.com/docs/orm/pagination",
+    docs: "https://noctisnova.com/tools/orm-doctor/orm-performance-checklist",
   },
 
   "prisma-singleton": {
@@ -104,7 +104,7 @@ const RULE_META = {
       "In Next.js dev, every file save creates another PrismaClient — after a few minutes you hit " +
       "'too many connections' and the whole app stops talking to the database until you restart.",
     severity: "warning",
-    docs: "https://noctisnova.com/docs/orm/prisma-singleton",
+    docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
   },
 
   "missing-transaction": {
@@ -120,7 +120,7 @@ const RULE_META = {
       "A transfer that debits one account then credits another: if the server crashes between the two writes, " +
       "money vanishes. A transaction guarantees both happen or neither does.",
     severity: "warning",
-    docs: "https://noctisnova.com/docs/orm/transactions",
+    docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
   },
 
   "missing-relation-action": {
@@ -136,7 +136,7 @@ const RULE_META = {
       "Deleting a User whose Posts have no onDelete either errors out ('foreign key constraint') or leaves " +
       "orphaned Posts pointing at a user that no longer exists. Setting it explicitly removes the surprise.",
     severity: "info",
-    docs: "https://noctisnova.com/docs/orm/referential-actions",
+    docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
   },
 
   "missing-index": {
@@ -170,7 +170,7 @@ const RULE_META = {
       "Re-running a seed in CI after the first run throws a unique constraint violation and fails " +
       "the build. Copying the seed to a new environment creates silent data conflicts.",
     severity: "warning",
-    docs: "https://noctisnova.com/docs/orm/seed-best-practices",
+    docs: "https://noctisnova.com/tools/orm-doctor/seed-best-practices",
   },
 
   "seed-no-truncate": {
@@ -187,7 +187,7 @@ const RULE_META = {
       "Your CI suite passes on the first run after a fresh database, then fails every subsequent " +
       "run with 'Unique constraint failed' until someone manually wipes the database.",
     severity: "warning",
-    docs: "https://noctisnova.com/docs/orm/seed-best-practices",
+    docs: "https://noctisnova.com/tools/orm-doctor/seed-best-practices",
   },
 
   "seed-no-disconnect": {
@@ -203,7 +203,7 @@ const RULE_META = {
       "CI jobs appear to complete (seed ran successfully) but the process never exits — the job " +
       "hits a timeout minutes later and is marked as failed.",
     severity: "info",
-    docs: "https://noctisnova.com/docs/orm/seed-best-practices",
+    docs: "https://noctisnova.com/tools/orm-doctor/seed-best-practices",
   },
 
   "seed-large-batch": {
@@ -220,7 +220,7 @@ const RULE_META = {
       "A seed with 200 individual create() calls takes 4–8 seconds locally and 20–60 seconds in " +
       "CI depending on DB latency. Batching into createMany() cuts that to under 1 second.",
     severity: "warning",
-    docs: "https://noctisnova.com/docs/orm/seed-best-practices",
+    docs: "https://noctisnova.com/tools/orm-doctor/seed-best-practices",
   },
 };
 

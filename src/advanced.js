@@ -1,4 +1,4 @@
-/**
+﻿/**
  * advanced.js — orm-doctor
  *
  * The advanced query-analysis engine. These rules catch the database bugs that
@@ -128,7 +128,7 @@ export async function scanUnsafeRawQueries(projectPath) {
           `\`${name}\` is called with a dynamically-built SQL string — this is a SQL injection hole. ` +
           "Any user input in that string can run arbitrary SQL. Use a tagged-template `prisma.$queryRaw\\`...\\`` " +
           "with ${} placeholders (auto-parameterised), or pass values as separate parameters to the Unsafe variant.",
-        docs: "https://noctisnova.com/docs/orm/raw-query-safety",
+        docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
         penalty: PENALTY_UNSAFE_RAW,
       });
     }
@@ -179,7 +179,7 @@ export async function scanMassMutations(projectPath) {
           `\`${name}\` has no \`where\` clause — it will ${name === "deleteMany" ? "DELETE every row" : "UPDATE every row"} in the table. ` +
           "A single accidental call wipes or rewrites all your data. Always scope mass mutations with a `where` filter " +
           "(use `where: {}` explicitly only if you truly mean the whole table, and guard it).",
-        docs: "https://noctisnova.com/docs/orm/mass-mutations",
+        docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
         penalty: PENALTY_MASS_MUTATION,
       });
     }
@@ -228,7 +228,7 @@ export async function scanMissingPagination(projectPath) {
           "`findMany()` has no `take` or `cursor` — it loads the ENTIRE table into memory. " +
           "That's fine with 10 rows and fatal with 1,000,000: the query slows linearly and can OOM the server. " +
           "Add `take` (and `cursor`/`skip`) to paginate.",
-        docs: "https://noctisnova.com/docs/orm/pagination",
+        docs: "https://noctisnova.com/tools/orm-doctor/orm-performance-checklist",
         penalty: PENALTY_MISSING_PAGINATION,
       });
     }
@@ -291,7 +291,7 @@ export async function scanPrismaSingleton(projectPath) {
       line,
       snippet: trimSnippet(lines[line - 1] ?? "new PrismaClient()"),
       message,
-      docs: "https://noctisnova.com/docs/orm/prisma-singleton",
+      docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
       penalty: PENALTY_PRISMA_SINGLETON,
     });
   }
@@ -352,7 +352,7 @@ export async function scanMissingTransaction(projectPath) {
           `This function performs ${writes.length} write operations that aren't wrapped in a transaction. ` +
           "If the process crashes between writes, your data is left half-updated (e.g. money debited but not credited). " +
           "Wrap dependent writes in `prisma.$transaction([...])` (or the interactive `$transaction(async (tx) => {...})`) so they all commit or all roll back.",
-        docs: "https://noctisnova.com/docs/orm/transactions",
+        docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
         penalty: PENALTY_MISSING_TX,
       });
     }
@@ -428,7 +428,7 @@ export async function scanMissingRelationActions(schemaPath) {
           `Relation \`${block.name}.${item.name}\` has no \`onDelete\` action. The default (\`Restrict\`/\`SetNull\`) ` +
           "is often not what you want — deleting a parent can either fail unexpectedly or silently orphan children. " +
           "Set it explicitly: `onDelete: Cascade` (delete children) or `Restrict` (block) so the behaviour is intentional.",
-        docs: "https://noctisnova.com/docs/orm/referential-actions",
+        docs: "https://noctisnova.com/tools/orm-doctor/database-safety-and-performance",
         penalty: PENALTY_RELATION_ACTION,
       });
     }

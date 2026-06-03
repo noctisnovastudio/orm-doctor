@@ -1,4 +1,4 @@
-/**
+﻿/**
  * scanner.js
  * AST-based static analyzer for ORM/database bottleneck detection.
  * Uses ts-morph for TypeScript traversal and @mrleebo/prisma-ast for schema parsing.
@@ -525,7 +525,7 @@ export async function scanSeedFiles(projectPath) {
           message:
             "Hardcoded ID in seed data — conflicts on re-seed and breaks across environments. " +
             "Let Prisma generate IDs with @default(cuid()) and store references in variables.",
-          docs: "https://noctisnova.com/docs/orm/seed-best-practices",
+          docs: "https://noctisnova.com/tools/orm-doctor/seed-best-practices",
           penalty: SEED_HARDCODED_ID_PENALTY,
         });
       }
@@ -554,7 +554,7 @@ export async function scanSeedFiles(projectPath) {
           "Seed file creates records without first clearing existing data. " +
           "Re-running the seed (common in CI) will throw duplicate key errors. " +
           "Add prisma.<model>.deleteMany({}) at the top of your seed in dependency order.",
-        docs: "https://noctisnova.com/docs/orm/seed-best-practices",
+        docs: "https://noctisnova.com/tools/orm-doctor/seed-best-practices",
         penalty: SEED_NO_TRUNCATE_PENALTY,
       });
     }
@@ -576,7 +576,7 @@ export async function scanSeedFiles(projectPath) {
           "Seed file does not call prisma.$disconnect(). " +
           "The Node.js process will hang in CI until the connection times out. " +
           "Wrap your seed in try/finally and call prisma.$disconnect() in the finally block.",
-        docs: "https://noctisnova.com/docs/orm/seed-best-practices",
+        docs: "https://noctisnova.com/tools/orm-doctor/seed-best-practices",
         penalty: SEED_NO_DISCONNECT_PENALTY,
       });
     }
@@ -597,7 +597,7 @@ export async function scanSeedFiles(projectPath) {
         message:
           `Seed file contains ${totalCreates} create() calls — this may exceed CI timeout limits (typically 30s). ` +
           "Use createMany() with a data array for bulk inserts, or split into chunked batches with Promise.all.",
-        docs: "https://noctisnova.com/docs/orm/seed-best-practices",
+        docs: "https://noctisnova.com/tools/orm-doctor/seed-best-practices",
         penalty: SEED_LARGE_BATCH_PENALTY,
       });
     }

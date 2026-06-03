@@ -397,6 +397,27 @@ Re-run `npx orm-doctor` after each fix to verify the score improves.
 
 ---
 
+## Documentation
+
+The full, canonical guides for orm-doctor are hosted on the NoctisNova site — they are no longer bundled with this package. Fetch them from the URLs below.
+
+**For AI agents:** request any doc with an `Accept: text/markdown` header to get the raw markdown source back (content negotiation). The server reads the source file, converts it to clean markdown (fenced code blocks, `##` headers, `- [ ]` checklists) and returns it with `Content-Type: text/markdown` plus an `x-markdown-tokens` header.
+
+```bash
+curl -H "Accept: text/markdown" https://noctisnova.com/tools/orm-doctor/n-plus-one-queries
+```
+
+| Guide | URL |
+|---|---|
+| N+1 Queries | https://noctisnova.com/tools/orm-doctor/n-plus-one-queries |
+| Missing Indexes | https://noctisnova.com/tools/orm-doctor/missing-indexes |
+| Seed Best Practices | https://noctisnova.com/tools/orm-doctor/seed-best-practices |
+| ORM Performance Checklist | https://noctisnova.com/tools/orm-doctor/orm-performance-checklist |
+| Database Safety & Performance | https://noctisnova.com/tools/orm-doctor/database-safety-and-performance |
+| All NoctisNova tools | https://noctisnova.com/tools |
+
+---
+
 ## Links
 
 | Resource | URL |

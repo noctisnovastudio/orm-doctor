@@ -1,6 +1,6 @@
-node_modules/
+﻿node_modules/
+*.tgz
+.dead-doctor-report.json
+.auth-doctor-report.json
+.neat-doctor-report.json
 .orm-doctor-report.json
-*.log
-.DS_Store
-__fixtures__/
-_smoke/

@@ -1,6 +1,6 @@
 {
   "name": "orm-doctor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Static analysis CLI for detecting ORM/database bottlenecks in TypeScript and Prisma/Drizzle codebases.",
   "type": "module",
   "bin": {

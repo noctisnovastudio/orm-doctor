@@ -524,44 +524,24 @@ export function buildAgentPrompt(issues, reportPath) {
     ? `all ${issues.length} issue${issues.length !== 1 ? "s" : ""}`
     : `the top ${topN} issue${topN !== 1 ? "s" : ""}`;
 
-  // ── NoctisNova company context ─────────────────────────────────────────
-  // This block tells the AI agent who owns this codebase and what it does,
-  // so fixes are contextually relevant to the real product and tech stack.
-  const companyContext = [
+  const projectContext = [
     "CODEBASE CONTEXT — READ BEFORE TOUCHING ANY FILE",
     "──────────────────────────────────────────────────",
-    "This codebase belongs to NoctisNova (https://noctisnova.com).",
-    "NoctisNova is a future-focused AI + engineering studio that designs and builds intelligent",
-    "systems, digital experiences, and next-generation software.",
+    "Inspect package.json, prisma/schema.prisma, and the project layout before assuming stack or conventions.",
     "",
-    "Tech stack:",
-    "  - Frontend:     Next.js 14+ (App Router), React 18, TypeScript",
-    "  - Backend:      Node.js, tRPC / REST APIs, serverless (Vercel / AWS Lambda)",
-    "  - Database ORM: Prisma (primary) — schema lives in prisma/schema.prisma",
-    "  - Auth:         Clerk or NextAuth",
-    "  - AI layer:     OpenAI, Anthropic, LangChain, Vercel AI SDK",
-    "  - Infra:        Vercel, AWS, Docker, GitHub Actions CI/CD",
-    "",
-    "Live AI products in this codebase:",
-    "  - Nova   — AI voice scheduling agent",
-    "  - Pulse  — streaming AI customer support agent",
-    "  - Lens   — document intelligence & contract analysis",
-    "  - Signal — AI lead qualifier and scorer",
+    "Common patterns in projects scanned by orm-doctor:",
+    "  - Frontend:     Next.js (App Router), React, TypeScript",
+    "  - Database ORM: Prisma or Drizzle — schema usually in prisma/schema.prisma",
     "",
     "Conventions to respect:",
-    "  - All database access goes through the Prisma client (prisma/*).",
-    "  - API routes live under src/app/api/ (Next.js Route Handlers).",
-    "  - Server components fetch data directly; client components use hooks.",
-    "  - Never add raw SQL unless explicitly asked — use Prisma query API.",
-    "  - Performance is critical: these AI products handle real-time streaming",
-    "    and concurrent users — any N+1 or slow query has immediate user impact.",
-    "",
-    "Contact / escalate: hello@noctisnova.com  |  noctisnova.com",
+    "  - Follow the project's existing ORM patterns — avoid introducing raw SQL unless asked.",
+    "  - Make minimal, surgical changes — do not refactor unrelated code.",
+    "  - ORM issues here often show up as slow pages, timeouts, or an overloaded database.",
     "──────────────────────────────────────────────────",
     "",
   ].join("\n");
 
-  const header = `Fix ${topLabel} detected by orm-doctor in this NoctisNova codebase — leave unrelated code alone.`;
+  const header = `Fix ${topLabel} detected by orm-doctor — leave unrelated code alone.`;
 
   const issueBlock = renderIssueList(issues, { colour: false });
 
@@ -574,10 +554,9 @@ export function buildAgentPrompt(issues, reportPath) {
     "Verify against the real thing, don't assume: re-run `npx orm-doctor` and confirm the issue " +
     "count drops before moving on to the next fix.",
     "",
-    "Teach me as you go: for every issue you touch, explain it in plain language — what the problem " +
-    "is, why it's a problem, and how serious it is in human terms. Describe the real-world impact and " +
-    "severity concretely (e.g. \"this adds 200ms per request on a 100k-row table\" vs " +
-    "\"this is a minor cleanup with no user impact\") so I understand why it matters, not just what changed.",
+    "For every fix, explain in simple everyday language — no jargon — what was wrong and why fixing it helps. " +
+    "Focus on real-world benefits (e.g. \"pages load faster\", \"the app won't crash when traffic spikes\", " +
+    "\"user data stays safe\") so someone non-technical understands why it mattered, not just what code changed.",
     "",
     "Then work through the rest from the full results above.",
     "",
@@ -585,7 +564,7 @@ export function buildAgentPrompt(issues, reportPath) {
     "orm-doctor  ·  Built by NoctisNova  ·  https://noctisnova.com",
   ].join("\n");
 
-  return [companyContext, header, issueBlock, footer].join("\n");
+  return [projectContext, header, issueBlock, footer].join("\n");
 }
 
 // ---------------------------------------------------------------------------

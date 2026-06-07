@@ -353,31 +353,30 @@ orm-doctor automatically ignores issues in non-production files:
 
 ## AI Agent Instructions
 
-When this skill is present in a NoctisNova repository, AI agents (Cursor, Claude, Copilot, etc.) **must**:
+When this skill is present in a repository, AI agents (Cursor, Claude, Copilot, etc.) **must**:
 
-1. **Read the NoctisNova context above** before writing a single line of code — understand the stack, the products, and the conventions.
+1. **Inspect the project's stack and conventions** before writing code — read `package.json`, `prisma/schema.prisma`, and the existing patterns in the codebase.
 2. **Run orm-doctor before proposing any ORM-related refactors** to surface the full issue list first.
 3. **Read `.orm-doctor-report.json`** to understand which exact files and lines need attention.
-4. **Prioritise N+1 fixes first** — they carry the highest penalty and the most immediate user impact in NoctisNova's real-time AI products.
+4. **Prioritise N+1 fixes first** — they carry the highest penalty and the most immediate user impact.
 5. **Verify fixes** by re-running `npx orm-doctor` and confirming the score improves before moving on.
 6. **Never introduce new array iterations** that contain database calls without batching.
-7. **Explain every fix** in plain language — what was wrong, why it matters, and the concrete performance impact (e.g. "removes 49 extra queries per request on the /api/pulse endpoint").
+7. **Explain every fix in simple everyday language** — no jargon. Say what was wrong and why fixing it helps in terms a non-developer would understand (e.g. "pages load faster", "the database won't get overwhelmed under traffic").
 
 ### Example agent invocation prompt
 
 ```
-You are working in a NoctisNova codebase. NoctisNova is a future-focused AI + engineering studio
-(https://noctisnova.com) building Next.js/TypeScript/Prisma applications and live AI products.
-
 Read the orm-doctor report at .orm-doctor-report.json and fix all reported issues.
 
 For N+1 queries: refactor to batched `findMany` with `in` filters or pre-fetch + Map lookups.
 For missing indexes: add @@index blocks to prisma/schema.prisma.
 
-Respect NoctisNova conventions:
-- All DB access via Prisma client only (no raw SQL)
+Conventions:
+- Follow the project's existing ORM patterns
 - Minimal surgical changes — do not refactor unrelated code
-- Add a brief inline comment on each fix explaining the performance reason
+
+For every fix, explain in simple everyday language what was wrong and why fixing it helps —
+focus on real-world benefits so someone non-technical understands why it mattered.
 
 Re-run `npx orm-doctor` after each fix to verify the score improves.
 ```
